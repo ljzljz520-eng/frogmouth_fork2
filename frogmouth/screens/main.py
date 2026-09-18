@@ -152,7 +152,8 @@ class Main(Screen[None]):  # pylint:disable=too-many-public-methods
         # allowing the content to get focus.
         #
         # https://github.com/Textualize/textual/issues/2380
-        self.query_one(Markdown).can_focus_children = False
+        for document in self.query(Markdown):
+            document.can_focus_children = False
 
         # Load up any history that might be saved.
         if history := load_history():
@@ -164,8 +165,9 @@ class Main(Screen[None]):  # pylint:disable=too-many-public-methods
         if self._initial_location is None and history:
             # ...start up revisiting the last location the user was looking
             # at.
-            self.query_one(Viewer).visit(history[-1], remember=False)
-            self.query_one(Omnibox).value = str(history[-1])
+            last_location = history[-1].location
+            self.query_one(Viewer).visit(last_location, remember=False)
+            self.query_one(Omnibox).value = str(last_location)
         elif self._initial_location is not None:
             # Seems there is an initial location; so let's start up looking
             # at that.
@@ -306,14 +308,12 @@ class Main(Screen[None]):  # pylint:disable=too-many-public-methods
         self.visit(event.location)
 
     def on_history_goto(self, event: History.Goto) -> None:
-        """Handle a request to go to a location from history.
+        """Handle a request to go to an entry from history.
 
         Args:
             event: The event to handle.
         """
-        self.visit(
-            event.location, remember=event.location != self.query_one(Viewer).location
-        )
+        self.query_one(Viewer).goto_history_id(event.history_id)
 
     def on_history_delete(self, event: History.Delete) -> None:
         """Handle a request to delete an item from history.
@@ -355,20 +355,21 @@ class Main(Screen[None]):  # pylint:disable=too-many-public-methods
         Args:
             event: The history update event.
         """
-        self.query_one(Navigation).history.update_from(event.viewer.history.locations)
-        save_history(event.viewer.history.locations)
+        entries = event.viewer.history.entries
+        self.query_one(Navigation).history.update_from(entries)
+        save_history(entries)
 
-    def on_markdown_table_of_contents_updated(
-        self, event: Markdown.TableOfContentsUpdated
+    def on_viewer_table_of_contents_updated(
+        self, event: Viewer.TableOfContentsUpdated
     ) -> None:
-        """Handle the table of contents of the document being updated.
+        """Handle the table of contents of the committed document being updated.
 
         Args:
             event: The table of contents update event to handle.
         """
-        # We don't handle this, the navigation pane does. Bounce the event
-        # over there.
-        self.query_one(Navigation).table_of_contents.on_table_of_contents_updated(event)
+        self.query_one(Navigation).table_of_contents.update_table_of_contents(
+            event.table_of_contents
+        )
 
     def on_markdown_table_of_contents_selected(
         self, event: Markdown.TableOfContentsSelected

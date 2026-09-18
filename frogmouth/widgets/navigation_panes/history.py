@@ -6,6 +6,7 @@ from functools import partial
 from pathlib import Path
 
 from httpx import URL
+from rich.markup import escape
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -13,6 +14,7 @@ from textual.message import Message
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
+from ...data import NavigationEntry
 from ...dialogs import YesNoDialog
 from .navigation_pane import NavigationPane
 
@@ -20,37 +22,45 @@ from .navigation_pane import NavigationPane
 class Entry(Option):
     """An entry in the history."""
 
-    def __init__(self, history_id: int, location: Path | URL) -> None:
+    def __init__(self, history_id: int, entry: NavigationEntry) -> None:
         """Initialise the history entry item.
 
         Args:
             history_id: The ID of the item of history.
-            location: The location being added to history.
+            entry: The navigation entry being added to history.
         """
-        super().__init__(self._as_prompt(location))
+        super().__init__(self._as_prompt(entry))
         self.history_id = history_id
         """The ID of the item of history."""
-        self.location = location
-        """The location for his entry in the history."""
+        self.entry = entry
+        """The navigation entry for this item of history."""
+
+    @property
+    def location(self) -> Path | URL:
+        """The location for this entry in the history."""
+        return self.entry.location
 
     @staticmethod
-    def _as_prompt(location: Path | URL) -> Text:
-        """Depict the location as a decorated prompt.
+    def _as_prompt(entry: NavigationEntry) -> Text:
+        """Depict the navigation entry as a decorated prompt.
 
         Args:
-            location: The location to depict.
+            entry: The entry to depict.
 
         Returns:
-            A prompt with icon, etc.
+            A prompt with icon, title and location.
         """
+        location = entry.location
         if isinstance(location, Path):
-            return Text.from_markup(
-                f":page_facing_up: [bold]{location.name}[/]\n[dim]{location.parent}[/]",
-                overflow="ellipsis",
-            )
+            icon = ":page_facing_up:"
+            title = entry.title or location.name
+            detail = str(location.parent)
+        else:
+            icon = ":globe_with_meridians:"
+            title = entry.title or Path(location.path).name
+            detail = f"{Path(location.path).parent}\n{location.host}"
         return Text.from_markup(
-            f":globe_with_meridians: [bold]{Path(location.path).name}[/]"
-            f"\n[dim]{Path(location.path).parent}\n{location.host}[/]",
+            f"{icon} [bold]{escape(title)}[/]\n[dim]{escape(detail)}[/]",
             overflow="ellipsis",
         )
 
@@ -92,31 +102,31 @@ class History(NavigationPane):
         """Focus the option list."""
         self.query_one(OptionList).focus(scroll_visible=False)
 
-    def update_from(self, locations: list[Path | URL]) -> None:
-        """Update the history from the given list of locations.
+    def update_from(self, entries: list[NavigationEntry]) -> None:
+        """Update the history from the given list of entries.
 
         Args:
-            locations: A list of locations to update the history with.
+            entries: A list of entries to update the history with.
 
         This call removes any existing history and sets it to the given
         value.
         """
         option_list = self.query_one(OptionList).clear_options()
-        for history_id, location in reversed(list(enumerate(locations))):
-            option_list.add_option(Entry(history_id, location))
+        for history_id, entry in reversed(list(enumerate(entries))):
+            option_list.add_option(Entry(history_id, entry))
 
     class Goto(Message):
-        """Message that requests the viewer goes to a given location."""
+        """Message that requests the viewer goes to a given history entry."""
 
-        def __init__(self, location: Path | URL) -> None:
+        def __init__(self, history_id: int) -> None:
             """Initialise the history goto message.
 
             Args:
-                location: The location to go to.
+                history_id: The ID of the history entry to go to.
             """
             super().__init__()
-            self.location = location
-            """The location to go to."""
+            self.history_id = history_id
+            """The ID of the history entry to go to."""
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         """Handle an entry in the history being selected.
@@ -126,7 +136,7 @@ class History(NavigationPane):
         """
         event.stop()
         assert isinstance(event.option, Entry)
-        self.post_message(self.Goto(event.option.location))
+        self.post_message(self.Goto(event.option.history_id))
 
     class Delete(Message):
         """Message that requests the viewer to delete an item of history."""
